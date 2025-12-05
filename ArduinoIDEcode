@@ -1,3 +1,6 @@
+// SOURCE CODE Overengineered Photoplethysmogram Evaluation Tool (OPET)
+// MIKROKONTROLER YANG DIGUNAKAN: RP2040 PICO ZERO WAVESHARE
+
 // LIBRARY
 #include <SPI.h>
 #include <Wire.h>
@@ -510,6 +513,8 @@ char buf_rtc_time[20];
 char buf_rtc_date[30];
 
 // FUNGSI - FUNGSI
+
+// Filter Lowpass
 float Filter_lowpass(float INPUT){
   // shift old samples
   for (int i = 3; i > 1; i--) {
@@ -527,6 +532,7 @@ float Filter_lowpass(float INPUT){
   return y[1];
 }
 
+// Filter Highpass
 float Filter_highpass(float INPUT){
 
   for (int i = 3; i > 1; i--) {
@@ -544,6 +550,84 @@ float Filter_highpass(float INPUT){
   return w[1];
 }
 
+// Mengukur BPM
+void BPM_measure(){
+  unsigned long current_time = millis(); 
+
+  if (output_bandpass > max_amplitude_window) {
+      max_amplitude_window = output_bandpass;
+  }
+  
+  if (current_time - last_threshold_update >= THRESHOLD_UPDATE_INTERVAL) {
+      last_threshold_update = current_time;
+
+      current_threshold = max_amplitude_window * ADAPTATION_FACTOR;
+
+      if (current_threshold < MIN_THRESHOLD_LIMIT) {
+          current_threshold = MIN_THRESHOLD_LIMIT; 
+      }
+      
+      max_amplitude_window = current_threshold; 
+  }
+
+  if (output_bandpass > current_threshold) {
+    if (!is_above_threshold) {
+      is_above_threshold = true;
+      min_peak_value = output_bandpass;
+    } 
+    else if (output_bandpass > min_peak_value) {
+      min_peak_value = output_bandpass;
+    }
+  }
+  
+  else if (is_above_threshold && (current_time - last_peak_time > MIN_PEAK_DELAY)) {
+    is_above_threshold = false; 
+
+    unsigned long rr_interval = current_time - last_peak_time;
+    last_peak_time = current_time;
+
+    instant_bpm_calculated = 60000.0 / rr_interval;
+    
+    bpm_history[bpm_index] = instant_bpm_calculated;
+    bpm_index = (bpm_index + 1) % BPM_AVG_COUNT; 
+  }
+
+  float total_bpm = 0.0;
+  for(int i = 0; i < BPM_AVG_COUNT; i++) {
+    total_bpm += bpm_history[i];
+  }
+
+  if (instant_bpm_calculated > 0) {
+      BPM = total_bpm / BPM_AVG_COUNT;
+      instant_bpm_calculated = 0.0;
+  }
+  
+  if (current_time - last_peak_time > MAX_RR_INTERVAL) {
+    
+    if (current_time - last_decay_time > BPM_DECAY_INTERVAL) {
+      last_decay_time = current_time;
+      
+      BPM -= BPM_DECAY_RATE; 
+      
+      if (BPM < 0.1) {
+        BPM = 0.0;
+
+        if (BPM == 0.0) {
+           for(int i = 0; i < BPM_AVG_COUNT; i++) {
+               bpm_history[i] = 0.0;
+           }
+           current_threshold = MIN_THRESHOLD_LIMIT;
+        }
+      }
+    }
+  } 
+  else {
+      last_decay_time = current_time;
+  }
+
+}
+
+// Ubah Orientasi OLED
 void OLEDorientation(){
   OLEDanimation(frames7, FRAME_COUNT7, ANIMATION_DURATION7);
 
@@ -560,6 +644,7 @@ void OLEDorientation(){
   EEPROM.commit();
 }
 
+// Menu Kalibrasi Clock
 void CLKcalibration(){
   OLEDanimation(frames5, FRAME_COUNT5, ANIMATION_DURATION5);
 
@@ -692,10 +777,12 @@ void CLKcalibration(){
   }
 }
 
+// Memeriksa Tahun Kabisat
 bool cekTahunKabisat(int year) {
   return ( (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) );
 }
 
+// Menentukan Jumlah Tanggal dalam Bulan
 int jumlahTanggal(int year, int month) {
   switch (month) {
     case 1:  return 31;
@@ -714,6 +801,7 @@ int jumlahTanggal(int year, int month) {
   }
 }
 
+// Waktu Clock
 void CLK_rtc(){
   DateTime now = rtc.now();
   sprintf(buf_rtc_time, "%02d:%02d",
@@ -725,6 +813,7 @@ void CLK_rtc(){
         now.year());
 }
 
+// UI Kalibrasi Clock
 void CLKcalibrationUI1(){
   display.clearDisplay();
   display.setTextSize(1);
@@ -833,6 +922,7 @@ void CLKcalibrationUI6(){
   display.display();
 }
 
+// Menu Settings
 void Settings(){
   OLEDanimation(frames3, FRAME_COUNT3, ANIMATION_DURATION3);
   delay(200);
@@ -892,6 +982,7 @@ void Settings(){
   }
 }
 
+// Mengukur Vbat di Awal-Awal
 void Vbat_measure_start(){
   int raw_now_bat = analogRead(batPin);
   sum_bat -= buf_bat[idx_bat];
@@ -907,6 +998,7 @@ void Vbat_measure_start(){
   Vbat_percent = (Vbat - 3.3) * 100.0 / (4.2 - 3.3);
 }
 
+// Menu Kalibrasi Vbat
 void Vbat_measure(){
   int raw_now_bat = analogRead(batPin);
   sum_bat -= buf_bat[idx_bat];
@@ -939,6 +1031,7 @@ void Vbat_measure(){
   Vbat_percent = (Vbat - 3.3) * 100.0 / (4.2 - 3.3);
 }
 
+// Menu Kalibrasi Vbat
 void Vbatcalibration(){
   display.clearDisplay();
   display.setTextSize(1);
@@ -972,6 +1065,7 @@ void Vbatcalibration(){
   }
 }
 
+// Menu Penyetingan Grafik
 void GraphSettings(){
   GraphSettingsUI1();
 
@@ -1102,6 +1196,7 @@ void GraphSettings(){
   }
 }
 
+// UI Menu Penyetingan Grafik
 void GraphSettingsUI1(){
   display.clearDisplay();
   display.setTextSize(1);
@@ -1210,6 +1305,7 @@ void GraphSettingsUI6(){
   display.display();
 }
 
+// Animasi OLED
 void OLEDanimation(const byte frames[][512], int FRAME_COUNT, int ANIMATION_DURATION){
   unsigned long startTime = millis();
   while (millis() - startTime < ANIMATION_DURATION) {
@@ -1221,6 +1317,7 @@ void OLEDanimation(const byte frames[][512], int FRAME_COUNT, int ANIMATION_DURA
   } 
 }
 
+// UI OLED
 void OLEDUI(){
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
@@ -1243,6 +1340,7 @@ void OLEDUI(){
   display.display();
 }
 
+// UI OLED setelah Kalibrasi Vbat
 void OLEDUI_Vbatcal(){
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
@@ -1396,79 +1494,10 @@ void loop() {
     input = 4095;
   }
 
-  unsigned long current_time = millis(); 
+  // Mengukur BPM
+  BPM_measure();
 
-  if (output_bandpass > max_amplitude_window) {
-      max_amplitude_window = output_bandpass;
-  }
-  
-  if (current_time - last_threshold_update >= THRESHOLD_UPDATE_INTERVAL) {
-      last_threshold_update = current_time;
-
-      current_threshold = max_amplitude_window * ADAPTATION_FACTOR;
-
-      if (current_threshold < MIN_THRESHOLD_LIMIT) {
-          current_threshold = MIN_THRESHOLD_LIMIT; 
-      }
-      
-      max_amplitude_window = current_threshold; 
-  }
-
-  if (output_bandpass > current_threshold) {
-    if (!is_above_threshold) {
-      is_above_threshold = true;
-      min_peak_value = output_bandpass;
-    } 
-    else if (output_bandpass > min_peak_value) {
-      min_peak_value = output_bandpass;
-    }
-  }
-  
-  else if (is_above_threshold && (current_time - last_peak_time > MIN_PEAK_DELAY)) {
-    is_above_threshold = false; 
-
-    unsigned long rr_interval = current_time - last_peak_time;
-    last_peak_time = current_time;
-
-    instant_bpm_calculated = 60000.0 / rr_interval;
-    
-    bpm_history[bpm_index] = instant_bpm_calculated;
-    bpm_index = (bpm_index + 1) % BPM_AVG_COUNT; 
-  }
-
-  float total_bpm = 0.0;
-  for(int i = 0; i < BPM_AVG_COUNT; i++) {
-    total_bpm += bpm_history[i];
-  }
-
-  if (instant_bpm_calculated > 0) {
-      BPM = total_bpm / BPM_AVG_COUNT;
-      instant_bpm_calculated = 0.0;
-  }
-  
-  if (current_time - last_peak_time > MAX_RR_INTERVAL) {
-    
-    if (current_time - last_decay_time > BPM_DECAY_INTERVAL) {
-      last_decay_time = current_time;
-      
-      BPM -= BPM_DECAY_RATE; 
-      
-      if (BPM < 0.1) {
-        BPM = 0.0;
-
-        if (BPM == 0.0) {
-           for(int i = 0; i < BPM_AVG_COUNT; i++) {
-               bpm_history[i] = 0.0;
-           }
-           current_threshold = MIN_THRESHOLD_LIMIT;
-        }
-      }
-    }
-  } 
-  else {
-      last_decay_time = current_time;
-  }
-
+  // Pengaturan Sinyal yang Ditampilkan di OLED
   if (pilihanGrafikOLED == 1){
     output_graphOLED = input;
   }
@@ -1482,6 +1511,7 @@ void loop() {
     output_graphOLED = output_bandpass;
   }
 
+  // Pengaturan Sinyal yang Ditampilkan di Serial1 & Menampilkan UI OLED
   if (pilihanGrafikSerial == 1){
     Serial1.println(input); // RAW SIGNAL
     if (!display.updateChart(output_graphOLED))
@@ -1517,7 +1547,6 @@ void loop() {
   }
   
   // Pengecekan Waktu Pemrosesan Per Loop
-
   if (loop_time_check){
     unsigned long after = millis();
     Serial.println("Waktu yang dibutuhkan untuk menjalani 1 loop program:" + String(after - now) + " ms");
