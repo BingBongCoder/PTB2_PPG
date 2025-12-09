@@ -52,28 +52,28 @@ float BPM = 0.0;
 int BPMmethod = 1;
 int BPMmethod_address = 80;
 bool menu_BPMmethod = false;
-double V_BASELINE = 0.0;
-const float ALPHA = 0.98;
+double v_baseline = 0.0;
+const float alpha = 0.98;
 
 // Pengukuran Denyut Jantung dengan Interval
 float current_threshold = 4.0;
 float min_peak_value = 0.0;       
 bool is_above_threshold = false;  
 unsigned long last_peak_time = 0;
-const unsigned long MIN_PEAK_DELAY = 300;  
-const unsigned long MAX_RR_INTERVAL = 3000;
-const float BPM_DECAY_RATE = 2.0; 
-const unsigned long BPM_DECAY_INTERVAL = 100;
+const unsigned long min_peak_delay = 300;  
+const unsigned long max_RR_interval = 3000;
+const float BPM_decay_rate = 2.0; 
+const unsigned long BPM_decay_interval = 100;
 unsigned long last_decay_time = 0;
-const int BPM_AVG_COUNT = 30; 
-float bpm_history[BPM_AVG_COUNT];
+const int BPM_avg_count = 30; 
+float bpm_history[BPM_avg_count];
 int bpm_index = 0;
 float instant_bpm_calculated = 0.0;
 float max_amplitude_window = 5.0; 
-const unsigned long THRESHOLD_UPDATE_INTERVAL = 1000;
+const unsigned long threshold_update_interval = 1000;
 unsigned long last_threshold_update = 0;
-const float ADAPTATION_FACTOR = 0.65; 
-const float MIN_THRESHOLD_LIMIT = 1.0;
+const float faktor_adaptasi = 0.65; 
+const float min_threshold_limit = 1.0;
 
 // Pengukuran Denyut Jantung dengan DFT
 const uint16_t N = 1024;
@@ -85,10 +85,14 @@ double vImag[N];
 int sample_index = 0;
 float f_BPM;
 float BPM_result;
-const float MAGNITUDE_THRESHOLD = 100.0;
-const int NO_FINGER_VALUE = 4095;
-const int FINGER_CHECK_PERIOD = 5;
+const float magnitude_threshold = 400.0;
+const int no_finger_value = 4095;
+const int finger_check_period = 5;
 
+// Pencetakan Grafik Spektrum (DFT)
+const int spectrum_size = BPM_max_index - BPM_min_index + 1;
+double spectrum_magnitudes[spectrum_size];
+int spectrum_array_index = 0;
 
 // BATERAI
 float Vref = 3.3;
@@ -644,13 +648,13 @@ void BPMMeasure_PeakInterval(){
       max_amplitude_window = output_bandpass;
   }
   
-  if (current_time - last_threshold_update >= THRESHOLD_UPDATE_INTERVAL) {
+  if (current_time - last_threshold_update >= threshold_update_interval) {
       last_threshold_update = current_time;
 
-      current_threshold = max_amplitude_window * ADAPTATION_FACTOR;
+      current_threshold = max_amplitude_window * faktor_adaptasi;
 
-      if (current_threshold < MIN_THRESHOLD_LIMIT) {
-          current_threshold = MIN_THRESHOLD_LIMIT; 
+      if (current_threshold < min_threshold_limit) {
+          current_threshold = min_threshold_limit; 
       }
       
       max_amplitude_window = current_threshold; 
@@ -666,7 +670,7 @@ void BPMMeasure_PeakInterval(){
     }
   }
   
-  else if (is_above_threshold && (current_time - last_peak_time > MIN_PEAK_DELAY)) {
+  else if (is_above_threshold && (current_time - last_peak_time > min_peak_delay)) {
     is_above_threshold = false; 
 
     unsigned long rr_interval = current_time - last_peak_time;
@@ -675,34 +679,34 @@ void BPMMeasure_PeakInterval(){
     instant_bpm_calculated = 60000.0 / rr_interval;
     
     bpm_history[bpm_index] = instant_bpm_calculated;
-    bpm_index = (bpm_index + 1) % BPM_AVG_COUNT; 
+    bpm_index = (bpm_index + 1) % BPM_avg_count; 
   }
 
   float total_bpm = 0.0;
-  for(int i = 0; i < BPM_AVG_COUNT; i++) {
+  for(int i = 0; i < BPM_avg_count; i++) {
     total_bpm += bpm_history[i];
   }
 
   if (instant_bpm_calculated > 0) {
-      BPM = total_bpm / BPM_AVG_COUNT;
+      BPM = total_bpm / BPM_avg_count;
       instant_bpm_calculated = 0.0;
   }
   
-  if (current_time - last_peak_time > MAX_RR_INTERVAL) {
+  if (current_time - last_peak_time > max_RR_interval) {
     
-    if (current_time - last_decay_time > BPM_DECAY_INTERVAL) {
+    if (current_time - last_decay_time > BPM_decay_interval) {
       last_decay_time = current_time;
       
-      BPM -= BPM_DECAY_RATE; 
+      BPM -= BPM_decay_rate; 
       
       if (BPM < 0.1) {
         BPM = 0.0;
 
         if (BPM == 0.0) {
-           for(int i = 0; i < BPM_AVG_COUNT; i++) {
+           for(int i = 0; i < BPM_avg_count; i++) {
                bpm_history[i] = 0.0;
            }
-           current_threshold = MIN_THRESHOLD_LIMIT;
+           current_threshold = min_threshold_limit;
         }
       }
     }
@@ -714,6 +718,7 @@ void BPMMeasure_PeakInterval(){
 
 // Pengukuran BPM dengan DFT
 float BPMMeasure_DFT(){
+  HammingWindow();
   double max_magnitude = 0.0;
   int k_peak = 0;
 
@@ -729,18 +734,51 @@ float BPMMeasure_DFT(){
 
     double magnitude = sqrt(sumReal * sumReal + sumImag * sumImag);
 
+    if (pilihanGrafikSerial == 0){
+      if (spectrum_array_index < spectrum_size){
+        spectrum_magnitudes[spectrum_array_index++] = magnitude;
+      }
+    }
+
     if (magnitude > max_magnitude){
       max_magnitude = magnitude;
       k_peak = k;
     }
   }
-  if (k_peak > 0 && max_magnitude > MAGNITUDE_THRESHOLD){
+
+  if (pilihanGrafikSerial == 0){
+    printSpectrumToSerial(spectrum_magnitudes, spectrum_size);
+  }
+
+  if (k_peak > 0 && max_magnitude > magnitude_threshold){
     f_BPM = (float)k_peak * resolusi_Fs;
     BPM_result = f_BPM * 60.0;
 
     return BPM_result;
   }
   return 0.0;
+}
+
+// Windowing DFT
+void HammingWindow(){
+  for (int n = 0; n < N; n++){
+    float window_k = 0.54 - 0.46 * cos(2.0 * PI * (float)n / (float)N);
+    vReal[n] = vReal[n] * window_k;
+  }
+}
+
+// Menghasilkan Data Magnitude pada Setiap Frekuensi ke Serial1
+void printSpectrumToSerial(double magnitudes[], int size){
+  Serial1.println("SPECTRUM ANALYSIS START");
+  for (int i = 0; i < size; i++){
+    Serial1.print(magnitudes[i], 2);
+
+    if (i < size - 1){
+      Serial1.print(",");
+    }
+  }
+  Serial1.println("");
+  Serial1.println("SPECTRUM ANALYSIS END");
 }
 
 // Ubah Orientasi OLED
@@ -1272,12 +1310,12 @@ void GraphSettings(){
                       if (digitalRead(OLEDbutPin)){
                         pilihanGrafikSerial += 1;
                         if (pilihanGrafikSerial > 4){
-                          pilihanGrafikSerial = 1;
+                          pilihanGrafikSerial = 0;
                         }
                       }
                       if (digitalRead(CLKbutPin)){
                         pilihanGrafikSerial -= 1;
-                        if (pilihanGrafikSerial < 1){
+                        if (pilihanGrafikSerial < 0){
                           pilihanGrafikSerial = 4;
                         }
                       }
@@ -1291,6 +1329,9 @@ void GraphSettings(){
                         EEPROM.put(pilihanGrafikOLED_address, pilihanGrafikOLED);
                         EEPROM.put(pilihanGrafikSerial_address, pilihanGrafikSerial);
                         EEPROM.commit();
+                        if (pilihanGrafikSerial == 0){
+                          BPMmethod = 2;
+                        }
                       }
                     }
                   }
@@ -1468,7 +1509,7 @@ void setup() {
   // BPM
   EEPROM.get(BPMmethod_address, BPMmethod);
   if (BPMmethod == 1){
-    for(int i = 0; i < BPM_AVG_COUNT; i++) {
+    for(int i = 0; i < BPM_avg_count; i++) {
       bpm_history[i] = 0.0;
     }
   }
@@ -1572,16 +1613,16 @@ void loop() {
     // Metode Pengukuran secara DFT
     else if (BPMmethod == 2){
     
-      if (sample_index % FINGER_CHECK_PERIOD == 0){
-        if (output_bandpass >= (NO_FINGER_VALUE - 50)){
+      if (sample_index % finger_check_period == 0){
+        if (output_bandpass >= (no_finger_value - 50)){
           BPM = 0.0;
           sample_index = 0;
         }
       }
 
-      V_BASELINE = ALPHA * V_BASELINE + (1.0 - ALPHA) * output_bandpass;
+      v_baseline = alpha * v_baseline + (1.0 - alpha) * output_bandpass;
 
-      vReal[sample_index] = output_bandpass - V_BASELINE;
+      vReal[sample_index] = output_bandpass - v_baseline;
 
       sample_index++;
 
@@ -1607,7 +1648,17 @@ void loop() {
     }
 
     // Pengaturan Sinyal yang Ditampilkan di Serial1 & Menampilkan UI OLED
-    if (pilihanGrafikSerial == 1){
+    if (pilihanGrafikSerial == 0){
+      if (!display.updateChart(output_graphOLED))
+      {
+        if (millis() - lastBatTime > BatReadInterval){
+          Vbat_measure();
+        }
+        display.clearDisplay();
+        OLEDUI();
+      }
+    }
+    else if (pilihanGrafikSerial == 1){
       Serial1.println(input); // RAW SIGNAL
       if (!display.updateChart(output_graphOLED))
       {
