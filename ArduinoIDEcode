@@ -81,23 +81,29 @@ const int stability_check_count = 10;
 const float max_std_dev = 1.0;
 
 // Pengukuran Denyut Jantung dengan DFT
-const uint16_t N = 1024;
-const float resolusi_Fs = Fs / N;
-const int BPM_min_index = 35; //
-const int BPM_max_index = 170; // 
-double vReal[N];
-double vImag[N];
+#define N_MAX 1024
+uint16_t N = N_MAX;
+int Nchoice = 4;
+int Nchoice_address = 90;
+float resolusi_Fs = Fs / N;
+#define BPM_min_search 35
+#define BPM_max_search 170
+uint16_t BPM_min_index = BPM_min_search; 
+uint16_t BPM_max_index = BPM_max_search;  
+double vReal[N_MAX];
+double vImag[N_MAX];
 int sample_index = 0;
 float f_BPM;
 float BPM_result;
-const float magnitude_threshold = 100.0;
+const float magnitude_threshold = 30.0;
 const int no_finger_value = 4095;
 const int finger_check_period = 5;
 bool is_sampling_in_progress = false;
 
 // Pencetakan Grafik Spektrum (DFT)
-const int spectrum_size = BPM_max_index - BPM_min_index + 1;
-double spectrum_magnitudes[spectrum_size];
+#define spectrum_size_MAX (BPM_max_search - BPM_min_search + 1)
+uint16_t spectrum_size;
+double spectrum_magnitudes[spectrum_size_MAX];
 int spectrum_array_index = 0;
 
 // BATERAI
@@ -614,11 +620,79 @@ void BPMmethodChoice(){
   }
 
   if (digitalRead(OLEDbutPin) && digitalRead(CLKbutPin)){
-    EEPROM.put(BPMmethod_address, BPMmethod);
-    EEPROM.commit();
-    menu_BPMmethod = false;
-  }
+    if (BPMmethod == 2){
+      delay(200);
+      while(menu_BPMmethod){
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0,0);
+        display.println("Jumlah Sampel (N)");
+        display.setCursor(0,11);
+        display.println("1. N=128 (6.4s)");
+        display.setCursor(0,22);
+        display.println("2. N=256 (12.8s)");
+        display.setCursor(0,33);
+        display.println("3. N=512 (25.6s)");
+        display.setCursor(0,44);
+        display.println("4. N=1024 (51.2s)");
+        display.setCursor(0,55);
+        display.println("Pilihan: " + String(Nchoice));
+        display.display();
 
+        delay(100);
+
+        if (digitalRead(OLEDbutPin)){
+          Nchoice += 1;
+          if (Nchoice > 4){
+            Nchoice = 1;
+          }
+        }
+        if(digitalRead(CLKbutPin)){
+          Nchoice -= 1;
+          if (Nchoice < 1){
+            Nchoice = 4;
+          }
+        }
+        if (digitalRead(OLEDbutPin) && digitalRead(CLKbutPin)){
+          EEPROM.put(BPMmethod_address, BPMmethod);
+          EEPROM.put(Nchoice_address, Nchoice);
+          EEPROM.commit();
+          if (Nchoice == 1){
+            N = 128;
+            BPM_min_index = 4;  
+            BPM_max_index = 21; 
+          }
+          else if (Nchoice == 2){
+            N = 256;
+            BPM_min_index = 9;  
+            BPM_max_index = 43;
+          }
+          else if (Nchoice == 3){
+            N = 512;
+            BPM_min_index = 17;  
+            BPM_max_index = 85;
+          }
+          else if (Nchoice == 4){
+            N = 1024;
+            BPM_min_index = 35;  
+            BPM_max_index = 170;
+          }
+          
+          resolusi_Fs = Fs / (float)N;
+          spectrum_size = BPM_max_index - BPM_min_index + 1;
+
+          if (spectrum_size > spectrum_size_MAX){
+            spectrum_size = spectrum_size_MAX;
+          }
+          
+          sample_index = 0;
+          BPMscan_percent = 0;
+          is_sampling_in_progress = false;
+          menu_BPMmethod = false;
+        }
+      }
+    }
+  }
   delay(100);
 }
 
@@ -746,6 +820,8 @@ bool checkBPMStability(){
 
 // Pengukuran BPM dengan DFT
 float BPMMeasure_DFT(){
+  spectrum_array_index = 0;
+  
   HammingWindow();
   double max_magnitude = 0.0;
   int k_peak = 0;
@@ -1480,7 +1556,7 @@ void OLEDUI(){
   display.drawBitmap(12, 22, Heart, 8, 8, WHITE);
   display.setTextSize(2);
   display.setCursor(0,32);
-  if (BPM == 0){
+  if (BPM < 1){
     display.println("---");
   }
   else {
@@ -1510,7 +1586,7 @@ void OLEDUI(){
       UIdot_counter = 0;
     }
   }
-  else if (BPMmethod == 2){
+  else if (BPMmethod == 2){ // UI Pengukuran BPM secara DFT
     if (BPMscan_percent > 0){
       display.println("(" + String(BPMscan_percent) + "%)");
     }
@@ -1599,6 +1675,29 @@ void setup() {
 
   // BPM
   EEPROM.get(BPMmethod_address, BPMmethod);
+  EEPROM.get(Nchoice_address, Nchoice);
+  
+  if (Nchoice == 1){
+    N = 128;
+    BPM_min_index = 4; 
+    BPM_max_index = 21;
+  }
+  else if (Nchoice == 2){
+    N = 256;
+    BPM_min_index = 9; 
+    BPM_max_index = 43;
+  }
+  else if (Nchoice == 3){
+    N = 512;
+    BPM_min_index = 17; 
+    BPM_max_index = 85;
+  }
+  else if (Nchoice == 4){
+    N = 1024;
+    BPM_min_index = 35; 
+    BPM_max_index = 170;
+  }
+
   if (BPMmethod == 1){
     for(int i = 0; i < BPM_avg_count; i++) {
       bpm_history[i] = 0.0;
@@ -1606,8 +1705,15 @@ void setup() {
   }
   else if (BPMmethod == 2){
     for (int i = 0; i < N; i++) {
-    vImag[i] = 0.0;
+      vReal[i] = 0.0;
+      vImag[i] = 0.0;
     }
+
+    resolusi_Fs = Fs / (float)N;
+
+    spectrum_size = BPM_max_index - BPM_min_index + 1;
+    sample_index = 0;
+    BPMscan_percent = 0;
   }
 
   bool is_sampling_in_progress = false;
