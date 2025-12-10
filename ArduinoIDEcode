@@ -54,8 +54,11 @@ int BPMmethod_address = 80;
 bool menu_BPMmethod = false;
 double v_baseline = 0.0;
 const float alpha = 0.98;
+bool BPMdone = false;
+int BPMscan_percent = 0;
+int UIdot_counter = 0;
 
-// Pengukuran Denyut Jantung dengan Interval
+// Pengukuran Denyut Jantung dengan Interval Puncak
 float current_threshold = 4.0;
 float min_peak_value = 0.0;       
 bool is_above_threshold = false;  
@@ -74,20 +77,23 @@ const unsigned long threshold_update_interval = 1000;
 unsigned long last_threshold_update = 0;
 const float faktor_adaptasi = 0.65; 
 const float min_threshold_limit = 1.0;
+const int stability_check_count = 10;
+const float max_std_dev = 1.0;
 
 // Pengukuran Denyut Jantung dengan DFT
 const uint16_t N = 1024;
 const float resolusi_Fs = Fs / N;
-const int BPM_min_index = 35;
-const int BPM_max_index = 170;
+const int BPM_min_index = 35; //
+const int BPM_max_index = 170; // 
 double vReal[N];
 double vImag[N];
 int sample_index = 0;
 float f_BPM;
 float BPM_result;
-const float magnitude_threshold = 400.0;
+const float magnitude_threshold = 100.0;
 const int no_finger_value = 4095;
 const int finger_check_period = 5;
+bool is_sampling_in_progress = false;
 
 // Pencetakan Grafik Spektrum (DFT)
 const int spectrum_size = BPM_max_index - BPM_min_index + 1;
@@ -225,40 +231,16 @@ const uint8_t clock_icon_8x8[] PROGMEM = {
   0b01000010,
   0b00111100
 };
-// Icon Heart
-const uint8_t heart_32x32_bitmap[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00,
-  0x07, 0x80, 0x78, 0x00,
-  0x1F, 0xC0, 0xFE, 0x00,
-  0x3F, 0xE1, 0xFF, 0x00,
-  0x7F, 0xF3, 0xFF, 0x80,
-  0x7F, 0xFF, 0xFF, 0x80,
-  0xFF, 0xFF, 0xFF, 0xC0,
-  0xFF, 0xFF, 0xFF, 0xC0,
-  0xFF, 0xFF, 0xFF, 0xC0,
-  0xFF, 0xFF, 0xFF, 0xC0,
-  0x7F, 0xFF, 0xFF, 0x80,
-  0x3F, 0xFF, 0xFF, 0x00,
-  0x1F, 0xFF, 0xFE, 0x00,
-  0x0F, 0xFF, 0xFC, 0x00,
-  0x07, 0xFF, 0xF8, 0x00,
-  0x03, 0xFF, 0xF0, 0x00,
-  0x01, 0xFF, 0xE0, 0x00,
-  0x00, 0xFF, 0xC0, 0x00,
-  0x00, 0x7F, 0x80, 0x00,
-  0x00, 0x3F, 0x00, 0x00,
-  0x00, 0x1E, 0x00, 0x00,
-  0x00, 0x0C, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00
+// Icon Hati
+const unsigned char Heart[] PROGMEM = {
+  0x66,
+  0xff,
+  0xff,
+  0xff,
+  0x7e,
+  0x3c,
+  0x18,
+  0x00
 };
 // Animasi OLED Awal (sinyal EKG)
 #define FRAME_COUNT1 (sizeof(frames1) / sizeof(frames1[0]))
@@ -692,6 +674,13 @@ void BPMMeasure_PeakInterval(){
       instant_bpm_calculated = 0.0;
   }
   
+  if (checkBPMStability()){
+    BPMdone = true;
+  }
+  else if (BPMdone == true){
+    BPMdone = false;
+  }
+
   if (current_time - last_peak_time > max_RR_interval) {
     
     if (current_time - last_decay_time > BPM_decay_interval) {
@@ -713,6 +702,45 @@ void BPMMeasure_PeakInterval(){
   } 
   else {
       last_decay_time = current_time;
+  }
+}
+
+bool checkBPMStability(){
+  if (bpm_index < stability_check_count && BPM == 0){
+    return false;
+  }
+
+  float mean = 0.0;
+  float sum_sq_diff = 0.0;
+  int valid_count = 0;
+
+  for (int i = 0; i < BPM_avg_count; i++){
+    if (bpm_history[i] > 0.0){
+      mean += bpm_history[i];
+      valid_count++;
+    }
+  }
+
+  if (valid_count == 0){
+    return false;
+  }
+
+  mean /= valid_count;
+
+  for (int i = 0; i < BPM_avg_count; i++){
+    if (bpm_history[i] > 0.0) {
+            float diff = bpm_history[i] - mean;
+            sum_sq_diff += diff * diff;
+    }
+  }
+
+  float std_dev = sqrt(sum_sq_diff / valid_count);
+
+  if (std_dev <= max_std_dev){
+    return true;
+  }
+  else {
+    return false;
   }
 }
 
@@ -777,7 +805,7 @@ void printSpectrumToSerial(double magnitudes[], int size){
       Serial1.print(",");
     }
   }
-  Serial1.println("");
+  Serial1.println();
   Serial1.println("SPECTRUM ANALYSIS END");
 }
 
@@ -1329,9 +1357,6 @@ void GraphSettings(){
                         EEPROM.put(pilihanGrafikOLED_address, pilihanGrafikOLED);
                         EEPROM.put(pilihanGrafikSerial_address, pilihanGrafikSerial);
                         EEPROM.commit();
-                        if (pilihanGrafikSerial == 0){
-                          BPMmethod = 2;
-                        }
                       }
                     }
                   }
@@ -1452,11 +1477,44 @@ void OLEDUI(){
   display.setCursor(97,10);
   display.println(buf_rtc_time);
   display.drawLine(0, 19, 127, 19, WHITE);
-  display.drawBitmap(3, 25, heart_32x32_bitmap, 32, 32, 1);
-  display.setCursor(7,49);
-  display.println(int(BPM));
-  display.setCursor(7,57);
+  display.drawBitmap(12, 22, Heart, 8, 8, WHITE);
+  display.setTextSize(2);
+  display.setCursor(0,32);
+  if (BPM == 0){
+    display.println("---");
+  }
+  else {
+    display.println(int(BPM));
+  }
+  display.setTextSize(1);
+  display.setCursor(8,48);
   display.println("BPM");
+  display.setCursor(0,56);
+  if (BPMmethod == 1){ // UI Pengukuran BPM secara Interval Puncak
+    if (!BPMdone){
+      if (UIdot_counter == 0){
+        display.println("Scan");
+      }
+      else if (UIdot_counter == 1){
+        display.println("Scan.");
+      }
+      else if (UIdot_counter == 2){
+        display.println("Scan..");
+      }
+      UIdot_counter++;
+      if (UIdot_counter > 2){
+        UIdot_counter = 0;
+      }
+    }
+    else{
+      UIdot_counter = 0;
+    }
+  }
+  else if (BPMmethod == 2){
+    if (BPMscan_percent > 0){
+      display.println("(" + String(BPMscan_percent) + "%)");
+    }
+  }
   display.drawChart(); // Membuat frame grafik sinyal PPG
   display.display();
 }
@@ -1475,11 +1533,44 @@ void OLEDUI_Vbatcal(){
   display.setCursor(97,10);
   display.println(buf_rtc_time);
   display.drawLine(0, 19, 127, 19, WHITE);
-  display.drawBitmap(3, 25, heart_32x32_bitmap, 32, 32, 1);
-  display.setCursor(7,49);
-  display.println(int(BPM));
-  display.setCursor(7,57);
+  display.drawBitmap(9, 22, Heart, 8, 8, WHITE);
+  display.setTextSize(2);
+  display.setCursor(0,32);
+  if (BPM == 0){
+    display.println("---");
+  }
+  else {
+    display.println(int(BPM));
+  }
+  display.setTextSize(1);
+  display.setCursor(0,48);
   display.println("BPM");
+  display.setCursor(0,56);
+  if (BPMmethod == 1){ // UI Pengukuran BPM secara Interval Puncak
+    if (!BPMdone){
+      if (UIdot_counter == 0){
+        display.println("Scan");
+      }
+      else if (UIdot_counter == 1){
+        display.println("Scan.");
+      }
+      else if (UIdot_counter == 2){
+        display.println("Scan..");
+      }
+      UIdot_counter++;
+      if (UIdot_counter > 2){
+        UIdot_counter = 0;
+      }
+    }
+    else{
+      UIdot_counter = 0;
+    }
+  }
+  else if (BPMmethod == 2){
+    if (BPMscan_percent > 0){
+      display.println("(" + String(BPMscan_percent) + "%)");
+    }
+  }
   display.drawChart(); // Membuat frame grafik sinyal PPG
   display.display();
 }
@@ -1518,6 +1609,8 @@ void setup() {
     vImag[i] = 0.0;
     }
   }
+
+  bool is_sampling_in_progress = false;
 
   // Baterai
   memset(buf_bat, 0, sizeof(buf_bat));
@@ -1567,12 +1660,12 @@ void setup() {
   EEPROM.get(pilihanGrafikSerial_address, pilihanGrafikSerial);
 
   display.clearDisplay();
-  display.setChartCoordinates(32, 63);    
-  display.setChartWidthAndHeight(94, 40); 
+  display.setChartCoordinates(39, 63);    
+  display.setChartWidthAndHeight(87, 40); 
   display.setXIncrement(inkremenX);
   display.setYLimits(batasY[0], batasY[1]);
   display.setYLabelsVisible(false);
-  display.setAxisDivisionsInc(200, 200);    
+  display.setAxisDivisionsInc(200, 200); 
   display.setPlotMode(SINGLE_PLOT_MODE); 
   display.setPointGeometry(POINT_GEOMETRY_NONE);
   display.setLineThickness(LIGHT_LINE);
@@ -1612,24 +1705,53 @@ void loop() {
     }
     // Metode Pengukuran secara DFT
     else if (BPMmethod == 2){
-    
-      if (sample_index % finger_check_period == 0){
-        if (output_bandpass >= (no_finger_value - 50)){
+      bool should_sample = is_sampling_in_progress;
+      const int sampling_start_threshold = no_finger_value - 50;
+
+      if (!is_sampling_in_progress){
+        if (input < sampling_start_threshold){
+          is_sampling_in_progress = true;
+          should_sample = true;
+          sample_index = 0;
+          BPMscan_percent = 0;
+          BPMdone = false;
+        }
+        else {
+          should_sample = false;
           BPM = 0.0;
           sample_index = 0;
+          BPMscan_percent = 0;
+          BPMdone = false;
         }
       }
 
-      v_baseline = alpha * v_baseline + (1.0 - alpha) * output_bandpass;
+      if (should_sample){
+        v_baseline = alpha * v_baseline + (1.0 - alpha) * output_bandpass;
 
-      vReal[sample_index] = output_bandpass - v_baseline;
+        vReal[sample_index] = output_bandpass - v_baseline;
 
-      sample_index++;
+        if (sample_index < N){
+          sample_index++;
+        }
 
-      if (sample_index >= N){
-        float new_bpm = BPMMeasure_DFT();
-        BPM = new_bpm;
-        sample_index = 0;
+        BPMscan_percent = (int)(((float)sample_index / (float)N) * 100.0);
+        if (BPMscan_percent > 99){
+          BPMscan_percent = 99;
+        }
+
+        if (sample_index >= N){
+          BPMscan_percent = 100;
+          float new_bpm = BPMMeasure_DFT();
+          if (new_bpm > 0.0){
+            BPM = new_bpm;
+            BPMdone = true;
+          }
+          else {
+            BPMdone = false;
+          }
+          sample_index = 0;
+          is_sampling_in_progress = false;
+        }
       }
     }
 
