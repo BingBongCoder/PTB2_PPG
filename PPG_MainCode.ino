@@ -78,7 +78,7 @@ unsigned long last_threshold_update = 0;
 const float faktor_adaptasi = 0.65; 
 const float min_threshold_limit = 1.0;
 const int stability_check_count = 10;
-const float max_std_dev = 1.0;
+const float max_std_dev = 2.0;
 
 // Pengukuran Denyut Jantung dengan DFT
 #define N_MAX 1024
@@ -1573,7 +1573,7 @@ void OLEDUI(){
   display.println("BPM");
   display.setCursor(0,56);
   if (BPMmethod == 1){ // UI Pengukuran BPM secara Interval Puncak
-    if (!BPMdone){
+    if (!BPMdone && BPM > 0){
       if (UIdot_counter == 0){
         display.println("Scan");
       }
