@@ -692,6 +692,12 @@ void BPMmethodChoice(){
         }
       }
     }
+    else{
+      sample_index = 0;
+      BPMscan_percent = 0;
+      is_sampling_in_progress = false;
+      menu_BPMmethod = false;
+    }
   }
   delay(100);
 }
@@ -1800,9 +1806,9 @@ void loop() {
     output_bandpass = Filter_highpass(output_lowpass);
 
     // Menghilangkan Noise Ripple (jika ada dan nilai maxADC bisa diubah-ubah di menu Settings)
-    if (input > maxADC){
-      input = 4095;
-    }
+    //if (input > maxADC){
+    //  input = 4095;
+    //}
 
     // Mengukur BPM
     // Metode Pengukuran secara Interval Puncak
