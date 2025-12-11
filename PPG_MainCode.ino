@@ -693,6 +693,8 @@ void BPMmethodChoice(){
       }
     }
     else{
+      EEPROM.put(BPMmethod_address, BPMmethod);
+      EEPROM.commit();
       sample_index = 0;
       BPMscan_percent = 0;
       is_sampling_in_progress = false;
